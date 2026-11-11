@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from datasets import load_dataset
-from data.data import DEFAULT_CACHE, Dataset
+from data.dataset import DEFAULT_CACHE, Dataset
 
 
 class MBPPPlus(Dataset):
