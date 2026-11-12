@@ -1,10 +1,8 @@
 from data.mbpp_plus import MBPPPlus
 import torch
 from transformer_lens.model_bridge import TransformerBridge
-import subprocess
-import tempfile
-import sys
-import json
+import sys, os, json, tempfile, subprocess
+
 
 # One solved example so the base model sees the expected format.
 FEW_SHOT = '''\
@@ -63,15 +61,38 @@ def run_tests(code: str, test_list: list[str]) -> tuple[bool, str]:
     except subprocess.TimeoutExpired:
         return False, "Timeout"
 
+def last_done_task_id(path):
+    last = None
+    if os.path.exists(path):
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    tid = json.loads(line)["task_id"]
+                except (json.JSONDecodeError, KeyError):
+                    continue  # ignore a half-written line
+                if last is None or tid > last:
+                    last = tid
+    return last
+
+
 # Given datasets like MBPP+ don't come with incorrect solutions
 # -> generate own incorrect solutions by calling an LLM 
 #    and seeing if the tests fail
 def generate_incorrect_solutions(ds: MBPPPlus, out_path: str = "incorrect_solutions.jsonl"):
     models = ["Qwen/Qwen2.5-Coder-7B"]
     bridge = TransformerBridge.boot_transformers(models[0], device="cpu", dtype=torch.bfloat16)
-    n_incorrect = 0
+
+    # Load already generated solutions
+    last = last_done_task_id(out_path)
+
     with torch.inference_mode(), open(out_path, "a") as out:
         for sample in ds:
+            if last is not None and sample["task_id"] <= last: 
+                print(f"{sample["task_id"]}: skipped")
+                continue
             prompt = build_prompt(sample)
             answer = bridge.generate(
                 prompt,
@@ -96,8 +117,7 @@ def generate_incorrect_solutions(ds: MBPPPlus, out_path: str = "incorrect_soluti
                     "error": error_message,
                 }) + "\n")
                 out.flush()
-                n_incorrect += 1
-        print(f"Generated {n_incorrect} incorrect solutions")
+        print("Done")
         return
 
 
